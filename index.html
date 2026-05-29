@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>El Lloradero</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@600&display=swap');
 :root{
@@ -1278,39 +1279,13 @@ function subscribeRealtime(){
 
 // ── DIBUJAR QR EN CANVAS ──
 function dibujarQRCanvas(url){
-  // Usamos una librería de QR simple via CDN
   var canvas = document.getElementById('qr-canvas');
-  var ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0,0,200,200);
-  ctx.fillStyle = '#0d0d0d';
-  ctx.font = '10px sans-serif';
-  ctx.textAlign = 'center';
-  // Cargar QRCode.js dinámicamente
-  if(window.QRCode){
-    _drawQR(url, canvas);
-  } else {
-    var s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
-    s.onload = function(){ _drawQR(url, canvas); };
-    document.head.appendChild(s);
-  }
-}
-
-function _drawQR(url, canvas){
   QRCode.toCanvas(canvas, url, {
     width: 200,
     margin: 2,
     color: { dark:'#0d0d0d', light:'#ffffff' }
   }, function(err){
-    if(err){
-      // Fallback: mostrar URL como texto
-      var ctx = canvas.getContext('2d');
-      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,200,200);
-      ctx.fillStyle='#0d0d0d';ctx.font='9px sans-serif';ctx.textAlign='center';
-      ctx.fillText('Abre esta URL:', 100, 90);
-      ctx.fillText(url.substring(0,40), 100, 110);
-    }
+    if(err) console.error('QR error:', err);
   });
 }
 
