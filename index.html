@@ -327,13 +327,29 @@ html,body{height:100%;background:var(--dark);color:var(--text);font-family:'DM S
 <!-- CLIENTE -->
 <div class="screen" id="s-cliente">
   <div class="topbar">
-    <div><div class="tb-brand">El Lloradero</div><div class="tb-user">Estado de tu pedido</div></div>
+    <div><div class="tb-brand">El Lloradero</div><div class="tb-user" id="cliente-mesa-lbl">Tu mesa</div></div>
+    <div class="tb-right">
+      <div class="icon-btn" id="cliente-menu-btn" title="Ver menú">☰</div>
+    </div>
+  </div>
+  <!-- Nav tabs cliente -->
+  <div class="nav-tabs" id="cliente-tabs" style="display:none">
+    <div class="nav-tab active" data-ctab="estado">Mi pedido</div>
+    <div class="nav-tab" data-ctab="pedir">Pedir más</div>
   </div>
   <div class="cliente-body" id="cliente-body">
     <div style="text-align:center;padding:40px 20px">
       <div style="font-size:40px;margin-bottom:12px">🔍</div>
-      <div style="font-size:15px;font-weight:500;color:var(--text-dim)">Buscando tu pedido...</div>
+      <div style="font-size:15px;font-weight:500;color:var(--text-dim)">Buscando tu mesa...</div>
     </div>
+  </div>
+  <!-- Resumen bar cliente -->
+  <div class="resumen-bar" id="cliente-res-bar">
+    <div class="res-info">
+      <div class="res-cnt" id="cliente-res-cnt">0 productos</div>
+      <div class="res-total" id="cliente-res-total">$0</div>
+    </div>
+    <button class="enviar-btn" id="btn-cliente-enviar">Pedir 🚀</button>
   </div>
 </div>
 
@@ -353,6 +369,22 @@ html,body{height:100%;background:var(--dark);color:var(--text);font-family:'DM S
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px" id="personas-grid"></div>
   </div>
   <button class="btn-gold" id="btn-confirm-personas">Tomar pedido</button>
+</div></div>
+
+<!-- MODAL QR MESA -->
+<div class="modal-ov" id="modal-qr-mesa"><div class="modal" style="text-align:center">
+  <div class="modal-hd" style="justify-content:center;position:relative">
+    <div class="modal-title" id="mqr-title">QR Mesa 1</div>
+    <div class="modal-close" style="position:absolute;right:0" onclick="closeModal('modal-qr-mesa')">×</div>
+  </div>
+  <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px">Muéstrale este QR al cliente para que pueda ver su pedido y pedir más</div>
+  <div style="background:#fff;border-radius:10px;padding:16px;display:inline-block;margin-bottom:16px">
+    <canvas id="qr-canvas" width="200" height="200"></canvas>
+  </div>
+  <div style="font-size:11px;color:var(--text-dim);margin-bottom:16px" id="mqr-url"></div>
+  <div style="display:flex;gap:8px">
+    <button class="btn-gold" id="btn-qr-ok" style="flex:1">Listo, tomar pedido</button>
+  </div>
 </div></div>
 
 <!-- MODAL MESA OCUPADA -->
@@ -980,8 +1012,26 @@ function abrirModalPersonas(){
   openModal('modal-personas');
 }
 
-document.getElementById('btn-confirm-personas').addEventListener('click',function(){
-  closeModal('modal-personas');openPedido();
+document.getElementById('btn-confirm-personas').addEventListener('click',async function(){
+  closeModal('modal-personas');
+  // Generar token único
+  var token = Math.random().toString(36).substring(2,10)+Math.random().toString(36).substring(2,6);
+  STATE.mesaToken = token;
+  var m = STATE.mesaActual;
+  // Guardar token en Supabase
+  await sb.from('mesas').update({token:token}).eq('id',m.id);
+  // Mostrar QR al mesero
+  var url = window.location.origin+window.location.pathname+'?mesa='+m.numero+'&token='+token;
+  document.getElementById('mqr-title').textContent = 'QR Mesa '+m.numero;
+  document.getElementById('mqr-url').textContent = url;
+  // Dibujar QR simple en canvas
+  dibujarQRCanvas(url);
+  openModal('modal-qr-mesa');
+});
+
+document.getElementById('btn-qr-ok').addEventListener('click',function(){
+  closeModal('modal-qr-mesa');
+  openPedido();
 });
 
 async function abrirModalMesaOcupada(){
@@ -1009,7 +1059,7 @@ document.getElementById('btn-agregar-pedido').addEventListener('click',function(
 
 document.getElementById('btn-cerrar-mesa').addEventListener('click',async function(){
   var m=STATE.mesaActual;
-  await sb.from('mesas').update({status:'lista',mesero_id:null}).eq('id',m.id);
+  await sb.from('mesas').update({status:'lista',mesero_id:null,token:null}).eq('id',m.id);
   closeModal('modal-mesa-ocupada');
   showToast('Mesa '+m.numero+' cerrada','var(--teal)');
   renderMeseroHome();
@@ -1226,59 +1276,332 @@ function subscribeRealtime(){
     .subscribe(function(status){setConn(status==='SUBSCRIBED');});
 }
 
-// ── CLIENTE (vista pública por mesa) ──
-async function loadClienteView(mesaNum){
-  var body=document.getElementById('cliente-body');
-  var {data:mesa}=await sb.from('mesas').select('*').eq('numero',mesaNum).single();
-  if(!mesa){body.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-dim)">Mesa no encontrada</div>';return;}
-  var {data:pedido}=await sb.from('pedidos').select('*,pedido_items(*)').eq('mesa_id',mesa.id).in('status',['nuevo','en_proceso','listo']).order('created_at',{ascending:false}).limit(1).single();
-  if(!pedido){
-    body.innerHTML='<div class="mesa-badge"><div class="lbl">Mesa</div><div class="num">'+mesaNum+'</div></div>'+
-      '<div style="text-align:center;padding:30px;color:var(--text-dim)"><div style="font-size:32px;margin-bottom:10px">⏳</div>Esperando pedido...</div>';
+// ── DIBUJAR QR EN CANVAS ──
+function dibujarQRCanvas(url){
+  // Usamos una librería de QR simple via CDN
+  var canvas = document.getElementById('qr-canvas');
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0,0,200,200);
+  ctx.fillStyle = '#0d0d0d';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'center';
+  // Cargar QRCode.js dinámicamente
+  if(window.QRCode){
+    _drawQR(url, canvas);
+  } else {
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
+    s.onload = function(){ _drawQR(url, canvas); };
+    document.head.appendChild(s);
+  }
+}
+
+function _drawQR(url, canvas){
+  QRCode.toCanvas(canvas, url, {
+    width: 200,
+    margin: 2,
+    color: { dark:'#0d0d0d', light:'#ffffff' }
+  }, function(err){
+    if(err){
+      // Fallback: mostrar URL como texto
+      var ctx = canvas.getContext('2d');
+      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,200,200);
+      ctx.fillStyle='#0d0d0d';ctx.font='9px sans-serif';ctx.textAlign='center';
+      ctx.fillText('Abre esta URL:', 100, 90);
+      ctx.fillText(url.substring(0,40), 100, 110);
+    }
+  });
+}
+
+// ══════════════════════════════════════
+// ── CLIENTE ──
+// ══════════════════════════════════════
+var CLIENTE = {
+  mesaId: null,
+  mesaNum: null,
+  tab: 'estado',
+  pedidoCliente: {},
+  productos: [],
+  categorias: [],
+  catActual: null,
+};
+
+async function loadClienteView(mesaNum, token){
+  CLIENTE.mesaNum = mesaNum;
+  document.getElementById('cliente-mesa-lbl').textContent = 'Mesa '+mesaNum;
+
+  var {data:mesa} = await sb.from('mesas').select('*').eq('numero',mesaNum).single();
+  if(!mesa){
+    document.getElementById('cliente-body').innerHTML =
+      '<div style="text-align:center;padding:40px;color:var(--text-dim)">Mesa no encontrada</div>';
     return;
   }
-  var steps=[
-    {key:'nuevo',label:'Recibido'},
-    {key:'en_proceso',label:'Preparando'},
-    {key:'listo',label:'Listo'},
-  ];
-  var curIdx=steps.findIndex(function(s){return s.key===pedido.status;});
-  var stepsHTML=steps.map(function(s,i){
-    var cls=i<curIdx?'done':i===curIdx?'active':'';
-    return '<div class="step '+cls+'"><div class="step-dot">'+(i<curIdx?'✓':i+1)+'</div><div class="step-lbl">'+s.label+'</div></div>';
-  }).join('');
-  var items=(pedido.pedido_items||[]);
-  var total=items.reduce(function(s,i){return s+i.precio*i.cantidad;},0);
-  body.innerHTML=
-    '<div class="mesa-badge"><div class="lbl">Mesa</div><div class="num">'+mesaNum+'</div></div>'+
-    '<div class="estado-card">'+
-    '<div class="estado-steps">'+stepsHTML+'</div>'+
-    '</div>'+
-    (pedido.status==='listo'?'<div style="background:var(--teal-dim);border:0.5px solid var(--teal);border-radius:12px;padding:14px;text-align:center;margin-bottom:14px"><div style="font-size:24px">🎉</div><div style="font-size:14px;font-weight:500;color:var(--teal);margin-top:6px">¡Tu pedido está listo!</div></div>':'')+
-    '<div class="estado-card">'+
-    '<div style="padding:11px 13px;border-bottom:0.5px solid var(--dark4);font-size:12px;font-weight:500;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px">Tu pedido</div>'+
-    '<div class="ped-items-list">'+items.map(function(i){
-      return '<div class="pi-row"><span class="pi-qty">×'+i.cantidad+'</span><span class="pi-name">'+i.nombre+'</span><span class="pi-price">'+fmt(i.precio*i.cantidad)+'</span></div>';
-    }).join('')+'</div>'+
-    '</div>'+
-    '<div class="ped-total"><span style="font-size:13px;color:var(--text-dim)">Total</span><span style="font-size:16px;font-weight:600;color:var(--gold)">'+fmt(total)+'</span></div>';
 
-  // Suscribir cambios en tiempo real
+  // Validar token
+  if(mesa.token && token !== mesa.token){
+    document.getElementById('cliente-body').innerHTML =
+      '<div style="text-align:center;padding:48px 24px">'+
+      '<div style="font-size:48px;margin-bottom:16px">🔒</div>'+
+      '<div style="font-size:16px;font-weight:500;color:var(--text);margin-bottom:8px">QR inválido</div>'+
+      '<div style="font-size:13px;color:var(--text-dim)">Este código ya no es válido.<br>Pide al mesero el QR actualizado.</div>'+
+      '</div>';
+    document.getElementById('cliente-tabs').style.display='none';
+    return;
+  }
+
+  // Si no hay token (mesa libre) solo puede ver menú
+  if(!mesa.token){
+    document.getElementById('cliente-tabs').style.display='none';
+    document.getElementById('cliente-body').innerHTML =
+      '<div style="text-align:center;padding:48px 24px">'+
+      '<div style="font-size:48px;margin-bottom:16px">🥃</div>'+
+      '<div style="font-size:16px;font-weight:500;color:var(--gold);margin-bottom:8px">Bienvenido a El Lloradero</div>'+
+      '<div style="font-size:13px;color:var(--text-dim)">Tu mesero estará contigo en breve.</div>'+
+      '</div>';
+    return;
+  }
+
+  CLIENTE.mesaId = mesa.id;
+  document.getElementById('cliente-tabs').style.display = 'flex';
+
+  // Cargar productos y cats en paralelo
+  var [catsR, prodsR] = await Promise.all([
+    sb.from('categorias').select('*').eq('activo',true).order('orden'),
+    sb.from('productos').select('*,categorias(nombre,tipo)').eq('disponible',true).order('nombre'),
+  ]);
+  CLIENTE.categorias = catsR.data||[];
+  CLIENTE.productos = prodsR.data||[];
+  CLIENTE.catActual = CLIENTE.categorias[0]?CLIENTE.categorias[0].id:null;
+
+  // Tabs
+  document.querySelectorAll('[data-ctab]').forEach(function(t){
+    t.addEventListener('click',function(){
+      CLIENTE.tab = this.getAttribute('data-ctab');
+      document.querySelectorAll('[data-ctab]').forEach(function(x){x.classList.remove('active');});
+      this.classList.add('active');
+      if(CLIENTE.tab==='estado') renderClienteEstado();
+      else renderClientePedir();
+    });
+  });
+
+  document.getElementById('cliente-menu-btn').addEventListener('click',function(){
+    CLIENTE.tab='pedir';
+    document.querySelectorAll('[data-ctab]').forEach(function(x){x.classList.remove('active');});
+    document.querySelector('[data-ctab="pedir"]').classList.add('active');
+    renderClientePedir();
+  });
+
+  renderClienteEstado();
+
+  // Realtime
   sb.channel('cliente-mesa-'+mesa.id)
-    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'pedidos',filter:'mesa_id=eq.'+mesa.id},function(){
-      loadClienteView(mesaNum);
+    .on('postgres_changes',{event:'*',schema:'public',table:'pedidos',filter:'mesa_id=eq.'+mesa.id},function(){
+      if(CLIENTE.tab==='estado') renderClienteEstado();
     }).subscribe();
 }
+
+async function renderClienteEstado(){
+  var body = document.getElementById('cliente-body');
+  document.getElementById('cliente-res-bar').classList.remove('show');
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-dim)">Cargando...</div>';
+
+  var {data:pedidos} = await sb.from('pedidos')
+    .select('*,pedido_items(*)')
+    .eq('mesa_id', CLIENTE.mesaId)
+    .in('status',['nuevo','en_proceso','listo'])
+    .order('created_at', {ascending:false});
+
+  if(!pedidos||!pedidos.length){
+    body.innerHTML =
+      '<div class="mesa-badge" style="margin-top:8px"><div class="lbl">Mesa</div><div class="num">'+CLIENTE.mesaNum+'</div></div>'+
+      '<div style="text-align:center;padding:30px;color:var(--text-dim)">'+
+      '<div style="font-size:36px;margin-bottom:12px">⏳</div>'+
+      '<div style="font-size:14px;font-weight:500;margin-bottom:8px">Esperando tu pedido</div>'+
+      '<div style="font-size:12px">Tu mesero tomará tu pedido en breve</div>'+
+      '</div>'+
+      '<div style="text-align:center;margin-top:8px">'+
+      '<button onclick="document.querySelector(\'[data-ctab=pedir]\').click()" style="background:var(--gold);color:#0d0d0d;border:none;border-radius:9px;padding:12px 24px;font-size:13px;font-weight:600;cursor:pointer;font-family:\'DM Sans\',sans-serif">Ver el menú</button>'+
+      '</div>';
+    return;
+  }
+
+  var steps=[{key:'nuevo',label:'Recibido'},{key:'en_proceso',label:'Preparando'},{key:'listo',label:'Listo'}];
+  var ultimoPedido = pedidos[0];
+  var curIdx = steps.findIndex(function(s){return s.key===ultimoPedido.status;});
+
+  var stepsHTML = steps.map(function(s,i){
+    var cls = i<curIdx?'done':i===curIdx?'active':'';
+    return '<div class="step '+cls+'"><div class="step-dot">'+(i<curIdx?'✓':i+1)+'</div><div class="step-lbl">'+s.label+'</div></div>';
+  }).join('');
+
+  // Total acumulado de todos los pedidos activos
+  var totalAcum = pedidos.reduce(function(s,p){
+    return s+(p.pedido_items||[]).reduce(function(s2,i){return s2+i.precio*i.cantidad;},0);
+  },0);
+
+  var listaPedidos = pedidos.map(function(p,idx){
+    var items = p.pedido_items||[];
+    var tot = items.reduce(function(s,i){return s+i.precio*i.cantidad;},0);
+    var sColor = {nuevo:'var(--orange)',en_proceso:'var(--gold)',listo:'var(--teal)'};
+    var sLabel = {nuevo:'Recibido',en_proceso:'Preparando',listo:'¡Listo!'};
+    return '<div style="background:var(--dark3);border:0.5px solid var(--dark4);border-radius:10px;padding:12px;margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;margin-bottom:8px">'+
+      '<span style="font-size:11px;font-weight:600;color:var(--text-dim)">Pedido '+(pedidos.length-idx)+'</span>'+
+      '<span style="font-size:11px;font-weight:600;color:'+(sColor[p.status]||'var(--text-dim)')+'">'+( sLabel[p.status]||p.status)+'</span>'+
+      '</div>'+
+      items.map(function(i){
+        return '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--dark4)">'+
+          '<span style="font-size:12px;font-weight:600;color:var(--gold);min-width:22px">×'+i.cantidad+'</span>'+
+          '<span style="font-size:12px;flex:1">'+i.nombre+'</span>'+
+          '<span style="font-size:12px;color:var(--text-dim)">'+fmt(i.precio*i.cantidad)+'</span>'+
+          '</div>';
+      }).join('')+
+      '<div style="text-align:right;margin-top:8px;font-size:12px;color:var(--gold);font-weight:500">'+fmt(tot)+'</div>'+
+      '</div>';
+  }).join('');
+
+  body.innerHTML =
+    '<div class="mesa-badge" style="margin-top:8px"><div class="lbl">Mesa</div><div class="num">'+CLIENTE.mesaNum+'</div></div>'+
+    (ultimoPedido.status==='listo'?
+      '<div style="background:var(--teal-dim);border:0.5px solid var(--teal);border-radius:12px;padding:14px;text-align:center;margin-bottom:12px">'+
+      '<div style="font-size:24px">🎉</div>'+
+      '<div style="font-size:14px;font-weight:600;color:var(--teal);margin-top:6px">¡Tu pedido está listo!</div>'+
+      '</div>':'')+
+    '<div class="estado-card" style="margin-bottom:12px"><div class="estado-steps">'+stepsHTML+'</div></div>'+
+    listaPedidos+
+    '<div class="ped-total" style="margin-bottom:16px"><span style="font-size:13px;color:var(--text-dim)">Total acumulado</span><span style="font-size:16px;font-weight:600;color:var(--gold)">'+fmt(totalAcum)+'</span></div>'+
+    '<div style="text-align:center;margin-bottom:8px">'+
+    '<button onclick="document.querySelector(\'[data-ctab=pedir]\').click()" style="background:var(--dark3);color:var(--text-mid);border:0.5px solid var(--dark5);border-radius:9px;padding:11px 24px;font-size:12px;font-weight:500;cursor:pointer;font-family:\'DM Sans\',sans-serif">+ Agregar más</button>'+
+    '</div>';
+}
+
+function renderClientePedir(){
+  var body = document.getElementById('cliente-body');
+  CLIENTE.pedidoCliente = {};
+
+  // Tabs de categorías
+  var tabsHTML = CLIENTE.categorias.map(function(c){
+    return '<div class="cat-tab'+(c.id===CLIENTE.catActual?' active':'')+'" data-ccid="'+c.id+'">'+c.emoji+' '+c.nombre+'</div>';
+  }).join('');
+
+  body.innerHTML =
+    '<div class="cat-tabs" style="display:flex;overflow-x:auto;background:var(--dark2);border-bottom:0.5px solid var(--dark4);margin:-14px -16px 12px;padding:0 16px">'+tabsHTML+'</div>'+
+    '<div id="cliente-prods"></div>';
+
+  body.querySelectorAll('[data-ccid]').forEach(function(t){
+    t.addEventListener('click',function(){
+      CLIENTE.catActual = this.getAttribute('data-ccid');
+      body.querySelectorAll('[data-ccid]').forEach(function(x){x.classList.remove('active');});
+      this.classList.add('active');
+      renderClienteProds();
+    });
+  });
+
+  renderClienteProds();
+  updateClienteResumen();
+}
+
+function renderClienteProds(){
+  var list = document.getElementById('cliente-prods');
+  if(!list) return;
+  var prods = CLIENTE.productos.filter(function(p){return p.categoria_id===CLIENTE.catActual;});
+  list.innerHTML = prods.map(function(p){
+    var qty = CLIENTE.pedidoCliente[p.id]||0;
+    return '<div class="prod-row">'+
+      '<div class="prod-info"><div class="prod-name">'+p.nombre+'</div><div class="prod-price">'+fmt(p.precio)+'</div></div>'+
+      '<div class="qty-ctrl">'+
+      '<div class="qty-btn" data-cminus="'+p.id+'">−</div>'+
+      '<div class="qty-num" id="cqn-'+p.id+'">'+qty+'</div>'+
+      '<div class="qty-btn plus" data-cplus="'+p.id+'">+</div>'+
+      '</div></div>';
+  }).join('');
+
+  list.querySelectorAll('[data-cplus]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var id=this.getAttribute('data-cplus');
+      CLIENTE.pedidoCliente[id]=(CLIENTE.pedidoCliente[id]||0)+1;
+      document.getElementById('cqn-'+id).textContent=CLIENTE.pedidoCliente[id];
+      updateClienteResumen();
+    });
+  });
+  list.querySelectorAll('[data-cminus]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var id=this.getAttribute('data-cminus');
+      if(CLIENTE.pedidoCliente[id]>0){
+        CLIENTE.pedidoCliente[id]--;
+        if(!CLIENTE.pedidoCliente[id]) delete CLIENTE.pedidoCliente[id];
+        document.getElementById('cqn-'+id).textContent=CLIENTE.pedidoCliente[id]||0;
+        updateClienteResumen();
+      }
+    });
+  });
+}
+
+function getClienteItems(){
+  return Object.keys(CLIENTE.pedidoCliente).map(function(id){
+    var p=CLIENTE.productos.find(function(x){return x.id===id;});
+    return p?{prod:p,qty:CLIENTE.pedidoCliente[id]}:null;
+  }).filter(Boolean);
+}
+
+function updateClienteResumen(){
+  var items=getClienteItems();
+  var cnt=items.reduce(function(s,i){return s+i.qty;},0);
+  var total=items.reduce(function(s,i){return s+i.prod.precio*i.qty;},0);
+  var bar=document.getElementById('cliente-res-bar');
+  document.getElementById('cliente-res-cnt').textContent=cnt+(cnt===1?' producto':' productos');
+  document.getElementById('cliente-res-total').textContent=fmt(total);
+  if(cnt>0) bar.classList.add('show'); else bar.classList.remove('show');
+}
+
+document.getElementById('btn-cliente-enviar').addEventListener('click',async function(){
+  var items=getClienteItems();
+  if(!items.length){showToast('Agrega productos primero','var(--red)');return;}
+  if(!CLIENTE.mesaId){showToast('Error: mesa no encontrada','var(--red)');return;}
+  var total=items.reduce(function(s,i){return s+i.prod.precio*i.qty;},0);
+
+  var {data:ped,error}=await sb.from('pedidos').insert({
+    mesa_id:CLIENTE.mesaId,
+    mesero_id:null,
+    status:'nuevo',
+    tipo:'mixto',
+    total:total
+  }).select().single();
+  if(error){showToast('Error al enviar','var(--red)');return;}
+
+  var pedItems=items.map(function(i){
+    return {
+      pedido_id:ped.id,
+      producto_id:i.prod.id,
+      nombre:i.prod.nombre,
+      precio:i.prod.precio,
+      cantidad:i.qty,
+      categoria:i.prod.categorias?i.prod.categorias.nombre:''
+    };
+  });
+  await sb.from('pedido_items').insert(pedItems);
+
+  showToast('¡Pedido enviado! 🚀');
+  CLIENTE.pedidoCliente={};
+  document.getElementById('cliente-res-bar').classList.remove('show');
+
+  // Ir a estado
+  CLIENTE.tab='estado';
+  document.querySelectorAll('[data-ctab]').forEach(function(x){x.classList.remove('active');});
+  document.querySelector('[data-ctab="estado"]').classList.add('active');
+  renderClienteEstado();
+});
 
 // ── ROUTING POR URL ──
 function checkRoute(){
   var params=new URLSearchParams(window.location.search);
   var mesa=params.get('mesa');
-  var rol=params.get('rol');
+  var token=params.get('token');
   if(mesa){
     STATE.user={rol:'cliente'};
     go('s-cliente');
-    loadClienteView(parseInt(mesa));
+    loadClienteView(parseInt(mesa), token);
     return true;
   }
   return false;
