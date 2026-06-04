@@ -1001,6 +1001,20 @@ function setTono(tono){
   document.getElementById('btn-tono-claro').style.borderColor = tono==='claro'?'var(--gold)':'rgba(201,168,76,0.3)';
   
   localStorage.setItem('lloradero-tono', tono);
+
+  // Manejar audio
+  var audioOscuro = document.getElementById('audio-oscuro');
+  var audioClaro = document.getElementById('audio-claro');
+  var icon = document.getElementById('music-icon');
+  
+  if(tono === 'oscuro'){
+    if(audioClaro){ audioClaro.pause(); audioClaro.currentTime=0; }
+    if(audioOscuro){ audioOscuro.volume=0.35; audioOscuro.play().catch(function(){}); }
+  } else {
+    if(audioOscuro){ audioOscuro.pause(); audioOscuro.currentTime=0; }
+    if(audioClaro){ audioClaro.volume=0.35; audioClaro.play().catch(function(){}); }
+  }
+  if(icon) icon.textContent = '♫';
 }
 
 // Cargar tono guardado
@@ -1057,11 +1071,15 @@ document.getElementById('mobile-menu-btn').addEventListener('click', function() 
 });
 </script>
 
+
+<!-- AUDIO TONO -->
+<audio id="audio-oscuro" loop preload="none"><source src="https://raw.githubusercontent.com/Lloradero/Lloradero/main/audio-oscuro.mp3" type="audio/mp3"></audio>
+<audio id="audio-claro" loop preload="none"><source src="https://raw.githubusercontent.com/Lloradero/Lloradero/main/audio-claro.mp3" type="audio/mp3"></audio>
 <!-- SELECTOR DE TONO -->
 <div id="tono-selector" style="position:fixed;bottom:24px;right:16px;z-index:200;display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-  <div style="font-size:10px;color:rgba(240,237,230,0.5);letter-spacing:1px;text-transform:uppercase;text-align:right;margin-bottom:2px">Tono</div>
-  <button onclick="setTono('oscuro')" id="btn-tono-oscuro" style="width:36px;height:36px;border-radius:50%;background:#2a3d2a;border:2px solid rgba(201,168,76,0.6);cursor:pointer;transition:transform .2s;box-shadow:0 2px 8px rgba(0,0,0,0.4)" title="Tono oscuro"></button>
-  <button onclick="setTono('claro')" id="btn-tono-claro" style="width:36px;height:36px;border-radius:50%;background:#c8b89a;border:2px solid rgba(201,168,76,0.3);cursor:pointer;transition:transform .2s;box-shadow:0 2px 8px rgba(0,0,0,0.3)" title="Tono claro"></button>
+  <div style="font-size:16px;text-align:right;margin-bottom:4px;opacity:0.6" id="music-icon">♪</div>
+  <button onclick="setTono('oscuro')" id="btn-tono-oscuro" title="Tono oscuro · Made (Jazz)" style="width:36px;height:36px;border-radius:50%;background:#2a3d2a;border:2px solid rgba(201,168,76,0.6);cursor:pointer;transition:transform .2s;box-shadow:0 2px 8px rgba(0,0,0,0.4)" title="Tono oscuro"></button>
+  <button onclick="setTono('claro')" id="btn-tono-claro" title="Tono claro · Laguna Song (Bossa Nova)" style="width:36px;height:36px;border-radius:50%;background:#c8b89a;border:2px solid rgba(201,168,76,0.3);cursor:pointer;transition:transform .2s;box-shadow:0 2px 8px rgba(0,0,0,0.3)" title="Tono claro"></button>
 </div>
 </body>
 </html>
